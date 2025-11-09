@@ -1,23 +1,10 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 import joblib
-import os
-import json
 from firebase_admin import credentials, db, initialize_app
 
 # ---------------- FIREBASE SETUP ----------------
-# Check if firebase_key.json exists locally
-if os.path.exists("firebase_key.json"):
-    cred = credentials.Certificate("firebase_key.json")
-else:
-    # Load from Render environment variable
-    firebase_key = os.getenv("FIREBASE_KEY")
-    if firebase_key:
-        cred_dict = json.loads(firebase_key)
-        cred = credentials.Certificate(cred_dict)
-    else:
-        raise FileNotFoundError("Firebase key not found! Set FIREBASE_KEY in environment variables.")
-
+cred = credentials.Certificate("firebase_key.json")  # Your downloaded key file
 initialize_app(cred, {
     'databaseURL': 'https://phishnet-backend-default-rtdb.asia-southeast1.firebasedatabase.app/'
 })
