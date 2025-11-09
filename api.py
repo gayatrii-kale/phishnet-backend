@@ -1,10 +1,14 @@
+
 from fastapi import FastAPI
 from pydantic import BaseModel
 import joblib
+import json, os
 from firebase_admin import credentials, db, initialize_app
 
 # ---------------- FIREBASE SETUP ----------------
-cred = credentials.Certificate("firebase_key.json")  # Your downloaded key file
+firebase_key = json.loads(os.getenv("FIREBASE_KEY"))
+cred = credentials.Certificate(firebase_key)
+  # Your downloaded key file
 initialize_app(cred, {
     'databaseURL': 'https://phishnet-backend-default-rtdb.asia-southeast1.firebasedatabase.app/'
 })
