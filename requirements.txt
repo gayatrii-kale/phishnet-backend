@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+firebase-admin
+joblib
+scikit-learn
+pandas
+nltk
