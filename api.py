@@ -4,8 +4,17 @@ import joblib
 from firebase_admin import credentials, db, initialize_app
 from urllib.parse import urlparse
 
+import json, os
+from firebase_admin import credentials
+
 # ---------------- FIREBASE SETUP ----------------
-cred = credentials.Certificate("firebase_key.json")  # Your downloaded key file
+firebase_key = os.environ.get("FIREBASE_KEY")
+if not firebase_key:
+    raise Exception("FIREBASE_KEY environment variable not found!")
+
+cred = credentials.Certificate(json.loads(firebase_key))
+
+
 initialize_app(cred, {
     'databaseURL': 'https://phishnet-backend-default-rtdb.asia-southeast1.firebasedatabase.app/'
 })
