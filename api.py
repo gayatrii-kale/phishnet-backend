@@ -3,6 +3,7 @@ from pydantic import BaseModel
 import joblib
 from firebase_admin import credentials, db, initialize_app
 from urllib.parse import urlparse
+import re
 
 import json, os
 from firebase_admin import credentials
@@ -44,24 +45,38 @@ class MessageInput(BaseModel):
 def is_phishy_url(url: str) -> bool:
     parsed = urlparse(url)
     domain = parsed.netloc.lower()
+    path = parsed.path.lower()
 
-    # ⚠️ Rule 1: Non-HTTPS links are suspicious
+    # Rule 1: HTTP instead of HTTPS
     if parsed.scheme == "http":
         return True
 
-    # ⚠️ Rule 2: Suspicious keywords
-    suspicious_words = ["reset", "verify", "account", "login", "update",
-                        "free", "prize", "gift", "claim", "reward", "win"]
-    if any(word in url.lower() for word in suspicious_words):
+    # Rule 2: Suspicious keywords
+    suspicious_keywords = [
+        "reset", "verify", "account", "login", "update", "secure",
+        "bank", "password", "confirm", "auth", "token", "wallet",
+        "prize", "free", "gift", "claim", "reward", "win"
+    ]
+    if any(word in url.lower() for word in suspicious_keywords):
         return True
 
-    # ⚠️ Rule 3: Too many dots (fake domains like paypal.security.verify.com)
+    # Rule 3: Too many dots or subdomains (typesquatting)
     if domain.count('.') > 2:
         return True
 
-    # ⚠️ Rule 4: Contains @ or weird characters
-    if "@" in url or "-" in domain:
+    # Rule 4: Contains '@' (phishers hide real domain this way)
+    if '@' in url:
         return True
+
+    # Rule 5: Hyphens in domain (fake lookalikes)
+    if re.search(r"[a-z0-9]+-[a-z0-9]+\.", domain):
+        return True
+
+    # Rule 6: Domain trying to impersonate another domain
+    legit_domains = ["google.com", "amazon.com", "paypal.com", "myservice.com"]
+    for legit in legit_domains:
+        if legit in domain and not domain.endswith(legit):
+            return True
 
     return False
 
@@ -76,24 +91,18 @@ def detect_url(data: URLInput):
     url = data.url.strip()
     ref = db.reference("/url_detections")
 
-    # 🔍 Rule-based phishing detection first
+    # Rule-based phishing detection first
     if is_phishy_url(url):
         ref.child(url.replace(".", "_")).set(1)
         return {"url": url, "prediction": 1, "source": "rule_based"}
 
-    # 🔄 Check cache
-    cached = ref.child(url.replace(".", "_")).get()
-    if cached is not None:
-        return {"url": url, "prediction": cached, "source": "firebase_cache"}
-
-    # 🤖 Predict using ML model
+    # If not caught by rules, use ML model
     features = url_vectorizer.transform([url])
     prediction = int(url_model.predict(features)[0])
-
-    # 💾 Save result
     ref.child(url.replace(".", "_")).set(prediction)
 
     return {"url": url, "prediction": prediction, "source": "model"}
+
 
 # ---------------- MESSAGE DETECTION ----------------
 @app.post("/detect_message")
