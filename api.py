@@ -6,7 +6,6 @@ from urllib.parse import urlparse
 import re
 
 import json, os
-from firebase_admin import credentials
 
 # ---------------- FIREBASE SETUP ----------------
 firebase_key = os.environ.get("FIREBASE_KEY")
@@ -73,7 +72,7 @@ def is_phishy_url(url: str) -> bool:
         return True
 
     # Rule 6: Domain trying to impersonate another domain
-    legit_domains = ["google.com", "amazon.com", "paypal.com", "myservice.com"]
+    legit_domains = ["google.com", "amazon.com"]
     for legit in legit_domains:
         if legit in domain and not domain.endswith(legit):
             return True
