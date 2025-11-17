@@ -1,4 +1,7 @@
-# backend api code
+# ============================
+#  PHISHNET BACKEND API (FINAL WORKING VERSION)
+# ============================
+
 from fastapi import FastAPI
 from pydantic import BaseModel
 import joblib
@@ -7,39 +10,47 @@ from urllib.parse import urlparse
 import re
 import json, os
 
-# ============================
-#  FIREBASE SETUP
-# ============================
-with open("firebase_key.json", "r") as f:
-    firebase_key = f.read()
 
-cred = credentials.Certificate(json.loads(firebase_key))
+# =====================================================
+#  FIREBASE SETUP (Render-safe, no local JSON file)
+# =====================================================
+firebase_key_str = os.environ.get("FIREBASE_KEY")
+
+if not firebase_key_str:
+    raise Exception("FIREBASE_KEY not found in environment variables! Add it in Render.")
+
+firebase_key_json = json.loads(firebase_key_str)
+
+cred = credentials.Certificate(firebase_key_json)
 
 initialize_app(cred, {
     'databaseURL': 'https://phishnet-backend-default-rtdb.asia-southeast1.firebasedatabase.app/'
 })
 
-# ============================
-#  FAST API APP
-# ============================
+
+# =====================================================
+#  FASTAPI SETUP
+# =====================================================
 app = FastAPI(
     title="PhishNet API",
-    description="Detect phishing URLs and messages using ML & Rule-Based logic",
-    version="3.0"
+    description="Detect phishing URLs and messages using ML & rule-based logic",
+    version="4.0"
 )
 
-# ============================
-#  LOAD MODELS
-# ============================
+
+# =====================================================
+#  LOAD MODELS + VECTORIZERS
+# =====================================================
 url_model = joblib.load("url_model.pkl")
 url_vectorizer = joblib.load("url_vectorizer.pkl")
 
 msg_model = joblib.load("model.pkl")
 msg_vectorizer = joblib.load("vectorizer.pkl")
 
-# ============================
-#  DATA MODELS
-# ============================
+
+# =====================================================
+#  REQUEST MODELS
+# =====================================================
 class URLInput(BaseModel):
     url: str
 
@@ -50,70 +61,68 @@ class CombinedInput(BaseModel):
     text: str
 
 
-# ============================
-#  SAFER RULE-BASED URL CHECK
-# ============================
+# =====================================================
+#  RULE-BASED URL CHECK
+# =====================================================
 def is_dangerous_url(url: str) -> bool:
-    """Only checks VERY strong phishing signs"""
+    """Checks strong phishing indicators only."""
     url_low = url.lower()
-    parsed = urlparse(url)
 
-    # Only catch things that are definitely suspicious
-    dangerous_patterns = [
-        "@",              # email style
-        ".php?",          # phishing login pages
-        "login-",         # fake login
-        "secure-",        # fake secure signals
-        "-verify",        # fake verification
+    strong_signs = [
+        "@",
+        ".php?",
+        "login-",
+        "secure-",
+        "-verify",
     ]
 
-    if any(p in url_low for p in dangerous_patterns):
-        return True
-
-    # HTTP is NOT counted as phishing — only a warning (handled by Android)
-    return False
+    return any(s in url_low for s in strong_signs)
 
 
-# ============================
-#  ROOT CHECK
-# ============================
+# =====================================================
+#  ROOT ENDPOINT
+# =====================================================
 @app.get("/")
 def root():
-    return {"message": "Woah! PhishNet API is running successfully !!"}
+    return {"message": "Bhaii ! PhishNet API is running successfully !!"}
 
 
-# ============================
-#  URL DETECTION
-# ============================
+# =====================================================
+#  URL DETECTOR
+# =====================================================
 @app.post("/detect_url")
 def detect_url(data: URLInput):
     url = data.url.strip()
     ref = db.reference("/url_detections")
 
+    # Rule-based first
     if is_dangerous_url(url):
         ref.child(url.replace(".", "_")).set(1)
         return {"url": url, "prediction": 1, "source": "rule_based"}
 
+    # ML model
     features = url_vectorizer.transform([url])
     prediction = int(url_model.predict(features)[0])
+
     ref.child(url.replace(".", "_")).set(prediction)
 
     return {"url": url, "prediction": prediction, "source": "model"}
 
 
-# ============================
-#  MESSAGE DETECTION
-# ============================
+# =====================================================
+#  MESSAGE DETECTOR
+# =====================================================
 @app.post("/detect_message")
 def detect_message(data: MessageInput):
     message = data.message.strip()
     ref = db.reference("/message_detections")
 
-    # Cache check
+    # Firebase cache
     cached = ref.child(message[:50].replace(".", "_")).get()
     if cached is not None:
         return {"message": message, "prediction": cached, "source": "firebase_cache"}
 
+    # ML prediction
     features = msg_vectorizer.transform([message])
     prediction = int(msg_model.predict(features)[0])
 
@@ -122,39 +131,36 @@ def detect_message(data: MessageInput):
     return {"message": message, "prediction": prediction, "source": "model"}
 
 
-# ============================
-#  COMBINED DETECTOR **FIXED**
-# ============================
+# =====================================================
+#  COMBINED DETECTOR
+# =====================================================
 @app.post("/detect_combined")
 def detect_combined(data: CombinedInput):
     text = data.text.strip()
     ref = db.reference("/combined_detections")
 
-    # 1️⃣ Extract URL from the text
-    urls = re.findall(r'(https?://[^\s]+)', text)
+    # Extract URL
+    urls = re.findall(r"(https?://[^\s]+)", text)
     extracted_url = urls[0] if urls else None
 
-    # 2️⃣ URL Prediction
+    # URL prediction
     url_prediction = 0
-    url_reason = "no_url_found"
+    url_reason = "no_url"
 
     if extracted_url:
-        url_reason = "clean_url"
-        
         if is_dangerous_url(extracted_url):
             url_prediction = 1
-            url_reason = "dangerous_pattern"
+            url_reason = "rule_based_phishing"
         else:
-            # ML URL model
             url_features = url_vectorizer.transform([extracted_url])
             url_prediction = int(url_model.predict(url_features)[0])
             url_reason = "ml_url_model"
 
-    # 3️⃣ Message Prediction
+    # Message prediction
     msg_features = msg_vectorizer.transform([text])
     msg_prediction = int(msg_model.predict(msg_features)[0])
 
-    # 4️⃣ FINAL DECISION (balanced)
+    # Final decision
     if extracted_url and url_prediction == 1:
         final_prediction = 1
         source = "url_indicated_phishing"
@@ -165,10 +171,9 @@ def detect_combined(data: CombinedInput):
         final_prediction = 0
         source = "safe"
 
-    # 5️⃣ SAVE TO FIREBASE
+    # Save in Firebase
     ref.child(text[:50].replace(".", "_")).set(final_prediction)
 
-    # 6️⃣ RETURN RESULT
     return {
         "text": text,
         "extracted_url": extracted_url,
