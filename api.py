@@ -10,9 +10,8 @@ import json, os
 # ============================
 #  FIREBASE SETUP
 # ============================
-firebase_key = os.environ.get("FIREBASE_KEY")
-if not firebase_key:
-    raise Exception("FIREBASE_KEY environment variable not found!")
+with open("firebase_key.json", "r") as f:
+    firebase_key = f.read()
 
 cred = credentials.Certificate(json.loads(firebase_key))
 
